@@ -1,0 +1,10 @@
+flask
+bs4
+alembic
+psycopg2
+requests
+yfinance==0.2.38
+vertexai
+sqlalchemy
+pydantic_settings
+waitress
