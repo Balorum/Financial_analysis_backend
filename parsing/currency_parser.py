@@ -174,12 +174,12 @@ def get_historical_data(page, history_period):
         return {}
 
 
-def update_companies(page):
+def update_companies(companies_dict):
     """
         Updates the Stock table in the database with the latest data.
 
         Args:
-            page (BeautifulSoup object): The parsed HTML page containing stock data.
+            companies_dict (dict): Information about all companies.
     """
     db = next(get_db())
     try:
@@ -192,7 +192,6 @@ def update_companies(page):
         db.commit()
 
         logging.info("Fetching currencies...")
-        companies_dict = get_currencies(page)
         if not companies_dict:
             logging.error("Failed to fetch company data")
             raise Exception("Failed to fetch company data")
@@ -221,13 +220,14 @@ def update_companies(page):
         db.close()
 
 
-def update_companies_history(history_period, page):
+def update_companies_history(history_period, historical_dict):
     """
         Updates the historical stock data in the database.
 
         Args:
             history_period (dict): Specifies the model and sequence details for different historical periods.
-            page (BeautifulSoup object): The parsed HTML page containing stock data.
+            historical_dict (dict): Information about all companies for certain periods of time
+.
     """
     db = next(get_db())
     try:
@@ -240,13 +240,12 @@ def update_companies_history(history_period, page):
         db.commit()
 
         logging.info("Fetching currencies...")
-        companies_dict = get_historical_data(page, history_period)
-        if not companies_dict:
+        if not historical_dict:
             logging.error("Failed to fetch company data")
             raise Exception("Failed to fetch company data")
 
         stocks_hist = []
-        for name, values in companies_dict.items():
+        for name, values in historical_dict.items():
             for value in values:
                 stock_hist = history_period["model"](title=name,
                                                      open=value['open'],
@@ -309,7 +308,7 @@ def start_parsing():
         logging.error("Failed to start parsing due to page load failure.")
 
 
-def start_parsing_history():
+def start_parsing_history(page):
     """
         Initiates the process to fetch and update historical stock data for different periods (year, month, day).
     """
@@ -319,7 +318,6 @@ def start_parsing_history():
         "day": {"period": "1d", "interval": "5m", "model": DailyStockHistory, "id": "daily_history_id_seq"},
         "2_years": {"period": "2y", "interval": "1d", "model": HistoryToAnalyze, "id": "analyze_history_id_seq"}
     }
-    page = get_page()
     update_companies_history(history["year"], page=page)
     update_companies_history(history["month"], page=page)
     update_companies_history(history["day"], page=page)

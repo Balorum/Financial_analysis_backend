@@ -7,18 +7,16 @@ from random import choice
 import yfinance as yf
 from database.db import get_db
 from database.models import StockNews, Stock, SentimentCompound
-from parsing import article_analyzer
+from parsing import article_analyzer, currency_parser
 
-
-# Configure logging to write to both a log file and the console
+# Configure logging to write logs to both a file and the console
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     handlers=[
-                        logging.FileHandler("logs/article_parser.log"),  # Log to a file
-                        logging.StreamHandler()  # Also log to console
+                        logging.FileHandler("logs/article_parser.log"),  # Logs to a file
+                        logging.StreamHandler()  # Logs to the console
                     ]
                     )
-
 
 # Different user-agent headers to mimic various browsers for web scraping
 header_1 = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'}
@@ -27,44 +25,50 @@ header_3 = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (K
 header_4 = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36"}
 header_5 = {"User-Agent": "Mozilla/5.0 (Linux; U; Linux i674 x86_64; en-US) AppleWebKit/600.12 (KHTML, like Gecko) Chrome/53.0.2954.236 Safari/602"}
 
-
-# List of headers to randomly choose from to avoid being blocked during scraping
+# List of headers to randomly choose from to avoid blocking during scraping
 HEADERS = [header_1, header_2, header_3, header_4, header_5]
 
 
-def get_companies_news():
+def get_companies_news(company_dict):
     """
-        Fetches news articles for all companies from Yahoo Finance.
+    Fetches news articles for all companies from Yahoo Finance.
 
-        Returns:
-            dict: A dictionary mapping stock symbols to a list of article links.
+    Args:
+        company_dict (dict): A dictionary mapping company names to their stock symbols.
+
+    Returns:
+        dict: A dictionary mapping stock symbols to a list of article links.
     """
-    db = next(get_db())  # Get a database session
-    logging.info(f"Query the database to get all current stocks...")
-    stocks = db.query(Stock).all()  # Fetch all stock entries from the database
+    logging.info("Obtaining company names...")
+    stocks = list(company_dict.keys())
     if not stocks:
         logging.error("No stocks found.")
     news_dict = {}
 
     for stock in stocks:
         try:
-            news = yf.Ticker(stock.title).get_news()  # Get news articles for the stock
+            news = yf.Ticker(stock).get_news()  # Fetch news articles for the stock
             article_list = []
             for article in news:
                 article_list.append(article["link"])  # Collect article links
 
-            news_dict[stock.title] = article_list
+            news_dict[stock] = article_list
         except Exception as e:
-            logging.error(f"Error fetching news for {stock.title}: {e}")
+            logging.error(f"Error fetching news for {stock}: {e}")
 
     return news_dict
 
 
-def fetch_article_content():
+def fetch_article_content(news_dict):
     """
-        Fetches content of the news articles, analyzes them, and saves the results to the database.
+    Fetches content of the news articles, analyzes them, and stores the results.
+
+    Args:
+        news_dict (dict): A dictionary mapping stock symbols to lists of article links.
+
+    Returns:
+        dict: A dictionary mapping normalized company names to lists of article titles, links, summaries, and ratings.
     """
-    news_dict = get_companies_news()
     articles_dict = {}
     for company, links in news_dict.items():
         logging.info(f"Analyzing company {company} started")
@@ -78,7 +82,7 @@ def fetch_article_content():
                 response_news = requests.get(news_link, headers=choice(HEADERS), timeout=40)
                 soup_news = bs.BeautifulSoup(response_news.text, 'html.parser')
 
-                # Skip articles with certain classes
+                # Skip articles with specific classes that indicate less relevant content
                 if soup_news.find('a', attrs={"class": "caas-readmore caas-readmore-collapse"}):
                     continue
 
@@ -88,7 +92,7 @@ def fetch_article_content():
                 if not article_div:
                     continue
 
-                # Extract paragraphs and check if there is sufficient content
+                # Extract paragraphs and ensure there is sufficient content
                 paragraphs = article_div.find_all('p')
                 if len(paragraphs) < 2:
                     continue
@@ -110,46 +114,42 @@ def fetch_article_content():
         # Normalize the company name for consistent storage
         company_name = normalize_company_name(company)
         articles_dict[company_name] = [titles_list, links_list, summary_list, rating_list]
-
-    # Save the analyzed articles and their sentiment compounds
-    save_compound(articles_dict)
-    save_articles_news(articles_dict)
+    return articles_dict
 
 
 def calc_compound(rating_list):
     """
-        Calculates the compound sentiment probabilities for a list of ratings.
+    Calculates the compound sentiment probabilities for a list of ratings.
 
-        Args:
-            rating_list (list): A list of ratings with probability metrics.
+    Args:
+        rating_list (list): A list of ratings with probability metrics.
 
-        Returns:
-            tuple: Decrease and increase probability averages.
+    Returns:
+        tuple: Decrease and increase probability averages.
     """
     rise = 0
     fall = 0
     inform = 0
     for news_rate in rating_list:
-        rise = rise + (news_rate["Increase Probability"] * news_rate["Informativeness"])
-        fall = fall + (news_rate["Decrease Probability"] * news_rate["Informativeness"])
-        inform = inform + news_rate["Informativeness"]
+        rise += (news_rate["Increase Probability"] * news_rate["Informativeness"])
+        fall += (news_rate["Decrease Probability"] * news_rate["Informativeness"])
+        inform += news_rate["Informativeness"]
 
     # Calculate the probability of stock prices falling or rising
-    fall_prob = fall/inform
-    rise_prob = rise/inform
+    fall_prob = fall / inform
+    rise_prob = rise / inform
     return fall_prob, rise_prob
 
 
 def save_compound(article_dict):
     """
-        Saves the sentiment compound data to the database.
+    Saves the sentiment compound data to the database.
 
-        Args:
-            article_dict (dict): Dictionary of analyzed articles with sentiment data.
+    Args:
+        article_dict (dict): Dictionary of analyzed articles with sentiment data.
     """
     db = next(get_db())
     try:
-
         # Clear existing sentiment compound data
         db.query(SentimentCompound).delete()
         db.commit()
@@ -162,14 +162,12 @@ def save_compound(article_dict):
         for company, values_list in article_dict.items():
             stock = db.query(Stock).filter_by(title=company).first()
             if stock:
-
                 # Calculate the compound sentiment probabilities
                 fall_prob, rise_prob = calc_compound(values_list[3])
                 compound = SentimentCompound(
                     stock_id=stock.id,
                     fall_probability=round(fall_prob, 2),
                     rise_probability=round(rise_prob, 2),
-
                 )
                 stock_compounds.append(compound)
             else:
@@ -188,30 +186,29 @@ def save_compound(article_dict):
 
 def normalize_company_name(company):
     """
-        Normalizes the company name by removing suffixes.
+    Normalizes the company name by removing common suffixes.
 
-        Args:
-            company (str): The original company name.
+    Args:
+        company (str): The original company name.
 
-        Returns:
-            str: Normalized company name.
+    Returns:
+        str: Normalized company name.
     """
     company_name = company.replace(', Inc.', '')
     company_name = company_name.replace(' Inc.', '')
-
     return company_name
 
 
 def analyze_articles(company, rows):
     """
-        Analyzes the content of an article and returns a summary and sentiment rating.
+    Analyzes the content of an article and returns a summary and sentiment rating.
 
-        Args:
-            company (str): The company name.
-            rows (list): List of paragraphs from the article.
+    Args:
+        company (str): The company name.
+        rows (list): List of paragraphs from the article.
 
-        Returns:
-            tuple: Summary and rating of the article.
+    Returns:
+        tuple: Summary and rating of the article.
     """
     article = ""
     for row in rows:
@@ -224,10 +221,10 @@ def analyze_articles(company, rows):
 
 def save_articles_news(news_dict):
     """
-        Saves the analyzed news articles to the database.
+    Saves the analyzed news articles to the database.
 
-        Args:
-            news_dict (dict): Dictionary of articles and their related data.
+    Args:
+        news_dict (dict): Dictionary of articles and their related data.
     """
     db = next(get_db())
     try:
@@ -245,7 +242,6 @@ def save_articles_news(news_dict):
             for title, link, summary, rating in zip(news_list[0], news_list[1], news_list[2], news_list[3]):
                 stock = db.query(Stock).filter_by(title=company).first()
                 if stock:
-
                     # Create a new StockNews entry for each article
                     one_news = StockNews(
                         stock_id=stock.id,
@@ -273,7 +269,7 @@ def save_articles_news(news_dict):
 
 def clear_news_db():
     """
-        Clears the news data from the StockNews table in the database.
+    Clears the news data from the StockNews table in the database.
     """
     db = next(get_db())
     try:

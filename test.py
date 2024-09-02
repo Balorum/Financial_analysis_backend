@@ -11,4 +11,10 @@
 from parsing import currency_parser, article_parser
 
 # currency_parser.start_parsing_history()
-article_parser.fetch_article_content()
+page = currency_parser.get_page()
+companies_dict = currency_parser.get_currencies(page)
+
+companies_dict = list(companies_dict.keys())
+
+print(companies_dict)
+print(type(companies_dict))
