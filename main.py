@@ -11,7 +11,7 @@ history = {
         "year": {"period": "1y", "interval": "1d", "model": StockHistory, "id": "stocks_history_id_seq"},
         "month": {"period": "1mo", "interval": "30m", "model": MonthlyStockHistory, "id": "monthly_history_id_seq"},
         "day": {"period": "1d", "interval": "5m", "model": DailyStockHistory, "id": "daily_history_id_seq"},
-        "2_years": {"period": "2y", "interval": "1d", "model": HistoryToAnalyze, "id": "analyze_history_id_seq"}
+        "2_years": {"period": "5y", "interval": "1d", "model": HistoryToAnalyze, "id": "analyze_history_id_seq"}
     }
 
 
